@@ -1,0 +1,28 @@
+#!/bin/bash
+################################################################################
+# Name: clone.prep
+# Description: Prepare system for clone template
+################################################################################
+
+# Number of kernels to keep
+TOTAL_KERNEL_COUNT=1
+
+################################################################################
+
+rm -rf /etc/sysconfig/network-scripts/ifcfg-e*
+
+set -e
+
+echo "Cleaing up old kernels"
+# dnf -y install yum-utils
+package-cleanup --oldkernels --count=${TOTAL_KERNEL_COUNT} -y
+grub2-mkconfig -o /boot/grub2/grub.cfg
+
+echo "Removing root password"
+passwd -d root
+
+rm -rf /root/anaconda-ks.cfg
+
+init 0
+
+################################################################################

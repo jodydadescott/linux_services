@@ -1,0 +1,109 @@
+#!/bin/bash
+################################################################################
+# Name: setup.base
+# Description: Create admin user; setup hosts, resolv.conf, and sudoers. 
+################################################################################
+
+interface="ens33"
+username="jody"
+group="staff"
+uid="501"
+gid="20"
+shell="/bin/zsh"
+resolver="169.0.0.10"
+
+################################################################################
+
+# These package(s) must have already been installed as we have not yet setup the
+# network
+# dnf -y install zsh ntp
+
+set -e
+
+newhostname=$1
+
+[[ $newhostname == "" ]] && { echo "Usage: $0 hostname"; exit 2; }
+
+hostnamectl set-hostname $newhostname
+
+cat /etc/group | grep -v ":$gid" > /tmp/group
+cat /tmp/group > /etc/group
+rm -rf /tmp/group
+groupdel $group > /dev/null 2>&1 ||:
+groupadd -g $gid $group
+
+# Delete the user if exist already
+userdel ${username} > /dev/null 2>&1 ||:
+
+# Create user
+useradd -u $uid -g $gid -s $shell ${username}
+
+# Add user to group docker
+usermod -aG docker ${username}
+
+# Update sudoers file so we can sudo without password
+cat <<EOF > /etc/sudoers
+Defaults   !visiblepw
+
+Defaults    env_reset
+Defaults    env_keep =  "COLORS DISPLAY HOSTNAME HISTSIZE KDEDIR LS_COLORS"
+Defaults    env_keep += "MAIL PS1 PS2 QTDIR USERNAME LANG LC_ADDRESS LC_CTYPE"
+Defaults    env_keep += "LC_COLLATE LC_IDENTIFICATION LC_MEASUREMENT LC_MESSAGES"
+Defaults    env_keep += "LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER LC_TELEPHONE"
+Defaults    env_keep += "LC_TIME LC_ALL LANGUAGE LINGUAS _XKB_CHARSET XAUTHORITY"
+
+Defaults    secure_path = /sbin:/bin:/usr/sbin:/usr/bin
+
+root	ALL=(ALL) 	ALL
+%${group}	ALL=(ALL)	NOPASSWD: ALL
+EOF
+
+# /etc/hosts
+cat <<EOF > /etc/hosts
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+EOF
+
+mac=`ifconfig $interface | grep ether | awk '{print $2}'`
+
+cat <<EOF > /etc/sysconfig/network-scripts/ifcfg-${interface}
+HWADDR=${mac}
+TYPE=Ethernet
+BOOTPROTO=dhcp
+DEFROUTE=yes
+PEERDNS=yes
+PEERROUTES=yes
+IPV4_FAILURE_FATAL=no
+IPV6INIT=yes
+IPV6_AUTOCONF=yes
+IPV6_DEFROUTE=yes
+IPV6_PEERDNS=yes
+IPV6_PEERROUTES=yes
+IPV6_FAILURE_FATAL=no
+IPV6_ADDR_GEN_MODE=stable-privacy
+NAME=${interface}
+UUID=$(uuidgen)
+ONBOOT=yes
+AUTOCONNECT_PRIORITY=-999
+EOF
+
+cat <<EOF > /etc/ntp.conf
+restrict 169.0.0.0 mask 255.255.255.0 nomodify notrap
+server 0.fedora.pool.ntp.org iburst
+server 1.fedora.pool.ntp.org iburst
+server 2.fedora.pool.ntp.org iburst
+server 3.fedora.pool.ntp.org iburst
+EOF
+
+cat <<EOF > /etc/rc.local
+#!/bin/bash
+systemctl enable ntpd && systemctl start ntpd
+rm -rf /etc/rc.local
+EOF
+
+chmod +x /etc/rc.local
+
+touch /etc/.setup
+echo "Successfully setup"
+
+################################################################################

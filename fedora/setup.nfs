@@ -1,0 +1,35 @@
+#!/bin/bash
+################################################################################
+# Name: setup.nfs
+# Desc: Setup NFS with automounter. NFS Server is Hypervisor
+################################################################################
+
+nfsserver="169.0.0.1"
+
+################################################################################
+
+[ -f /etc/.setup ] || { echo "Run base.setup first!"; exit 2; }
+
+dnf -y install rpcbind nfs-utils autofs
+
+# Allow ssh keys over nfs home dir
+setsebool -P use_nfs_home_dirs 1
+
+echo "*   ${nfsserver}:/Users/&" > /etc/auto.home
+
+cat <<EOF > /etc/auto.master
+/misc	/etc/auto.misc
+/net	-hosts
++dir:/etc/auto.master.d
++auto.master
+/home	/etc/auto.home
+EOF
+
+systemctl start rpcbind nfs-mountd
+systemctl enable rpcbind nfs-mountd
+systemctl start autofs
+systemctl enable autofs
+
+echo "Successfully setup!"
+
+################################################################################

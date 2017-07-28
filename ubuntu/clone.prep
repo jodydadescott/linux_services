@@ -1,0 +1,26 @@
+#!/bin/bash
+################################################################################
+# Name: clone.prep
+# Description: Prepare system for clone template
+################################################################################
+
+# Number of kernels to keep
+TOTAL_KERNEL_COUNT=1
+
+################################################################################
+
+set -e
+
+# NOT FINISHED
+# echo "Cleaing up old kernels"
+## This should list all kernels except the current, now we need to cleanup
+# dpkg -l | tail -n +6 | grep -E 'linux-image-[0-9]+' | grep -Fv $(uname -r)
+# Need to iterate and then call
+# dpkg --purge linux-image-4.4.0-18-generic
+# 
+# grub2-mkconfig -o /boot/grub2/grub.cfg
+
+echo "Removing root password"
+passwd -d root
+
+################################################################################

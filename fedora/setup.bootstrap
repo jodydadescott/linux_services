@@ -1,0 +1,217 @@
+#!/bin/bash
+################################################################################
+# Name: setup.bootstrap
+# Description: Setups a static IP, DHCPD and NAMED
+# Notes: This script is not perfect, some stuff is probably hard coded
+################################################################################
+
+domain="example.com"
+interface="ens33"
+ip="169.0.0.10"
+gateway="169.0.0.2"
+mask="255.255.255.0"
+arpa="169.in-addr.arpa"
+secret="uSuMl76i3F2IgCC0f/27WA=="
+
+################################################################################
+
+set -e
+
+hostname=$(hostname)
+
+function main()
+{
+[ -f /etc/.setup ] || { echo "Run base.setup first!"; exit 2; }
+setup_interface
+setup_tempresolver
+host google.com || { echo "Resolver not working yet"; exit 3; }
+setup_dhcpd || { echo "DHCPD Setup Failed!!!"; exit 4; }
+setup_named || { echo "NAMED Setup Failed!!!"; exit 5; }
+}
+
+function setup_interface()
+{
+mac=`ifconfig $interface | grep ether | awk '{print $2}'`
+
+cat <<EOF > /etc/sysconfig/network-scripts/ifcfg-${interface}
+HWADDR=${mac}
+TYPE=Ethernet
+BOOTPROTO=static
+IPADDR=${ip}
+NETMASK=${mask}
+GATEWAY=${gateway}
+DEFROUTE=yes
+PEERDNS=yes
+PEERROUTES=yes
+IPV4_FAILURE_FATAL=no
+IPV6INIT=yes
+IPV6_AUTOCONF=yes
+IPV6_DEFROUTE=yes
+IPV6_PEERDNS=yes
+IPV6_PEERROUTES=yes
+IPV6_FAILURE_FATAL=no
+IPV6_ADDR_GEN_MODE=stable-privacy
+NAME=${interface}
+UUID=$(uuidgen)
+ONBOOT=yes
+AUTOCONNECT_PRIORITY=-999
+EOF
+
+ifdown $interface
+ifup $interface
+}
+
+################################################################################
+
+function setup_tempresolver()
+{
+rm -rf /etc/resolv.conf
+cat <<EOF > /etc/resolv.conf
+search localdomain $domain
+nameserver 8.8.8.8
+EOF
+sleep 3
+}
+
+function setup_dhcpd()
+{
+service="dhcpd"
+dnf -y install dhcp
+rm -rf /etc/dhcp
+mkdir -p /etc/dhcp
+
+cat <<EOF > /etc/dhcp/dhcpd.conf
+
+ddns-updates on;
+ddns-update-style interim;
+update-static-leases on;
+authoritative;
+key rndc-key { algorithm hmac-md5; secret ${secret};}
+allow unknown-clients;
+use-host-decl-names on;
+default-lease-time 1814400; #21 days
+max-lease-time 1814400; #21 days
+log-facility local7;
+
+subnet 169.0.0.0 netmask 255.255.255.0 {
+   range 169.0.0.100 169.0.0.254;
+   option routers 169.0.0.2;
+   option domain-name-servers 169.0.0.10;
+   option domain-name "${domain}";
+   ddns-domainname "${domain}.";
+   ddns-rev-domainname "in-addr.arpa.";
+}
+
+zone ${domain}. {
+   primary localhost;
+   key rndc-key;
+}
+
+zone ${arpa}. {
+   primary localhost;
+   key rndc-key;
+}
+EOF
+
+chown -Rf dhcpd:dhcpd /etc/dhcp
+
+systemctl start $service && systemctl enable $service
+}
+
+################################################################################
+
+function setup_named()
+{
+service="named"
+
+dnf -y install bind bind-utils
+
+rm -rf /var/named
+mkdir -p /var/named/zones
+rm -rf /etc/named.conf
+
+cat <<EOF > /etc/named.conf
+options {
+	listen-on port 53 { any; };
+	listen-on-v6 port 53 { ::1; };
+	directory "/var/named";
+	allow-query { any; };
+	recursion yes;
+	allow-recursion { any; };
+	allow-recursion-on { any; };
+
+	forward only;
+
+	forwarders {
+		8.8.8.8;
+		8.8.4.4;
+	};
+};
+
+key "rndc-key" {
+	algorithm hmac-md5;
+	secret "${secret}";
+};
+
+zone "." IN {
+	type hint;
+	file "named.ca";
+};
+
+zone "${domain}" {
+	type master;
+	file "zones/${domain}";
+	allow-update { key rndc-key; };
+};
+
+zone "${arpa}" {
+	type master;
+	file "zones/${arpa}";
+	allow-update { key rndc-key; };
+};
+
+EOF
+
+cat <<EOF > /var/named/zones/${domain}
+\$TTL    604800
+@       IN      SOA     ${hostname}.${domain}. admin.${domain}. (
+                  3     ; Serial
+             604800     ; Refresh
+              86400     ; Retry
+            2419200     ; Expire
+             604800 )   ; Negative Cache TTL
+;
+	IN      NS      ${hostname}.${domain}.
+
+$hostname        IN  A   $ip
+EOF
+
+cat <<EOF > /var/named/zones/${arpa}
+\$TTL    604800
+@       IN      SOA     ${hostname}.${domain}. admin.${hostname}.${domain}. (
+                              1         ; Serial
+                         604800         ; Refresh
+                          86400         ; Retry
+                        2419200         ; Expire
+                         604800 )       ; Negative Cache TTL
+;
+        IN      NS      ${hostname}.${domain}.
+10.0.0  IN      PTR     ${hostname}.${domain}.
+EOF
+
+dig +bufsize=1200 +norec NS . @a.root-servers.net > /var/named/named.ca
+
+chown -Rf named:named /var/named
+
+systemctl start $service && systemctl enable $service
+
+rm -rf /etc/resolv.conf
+cat <<EOF > /etc/resolv.conf
+search localdomain $domain
+nameserver 127.0.0.1
+EOF
+}
+
+main $@
+
+################################################################################

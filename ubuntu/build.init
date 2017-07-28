@@ -1,0 +1,12 @@
+# Installed Ubuntu Server from ISO (normal server)
+# bash this
+
+apt-get -y update
+
+apt-get -y install zsh openssh-server
+
+curl -fsSL https://get.docker.com/ | sh
+systemctl enable docker
+systemctl start docker
+
+apt-get -y install rpcbind nfs-common autofs

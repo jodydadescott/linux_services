@@ -1,0 +1,34 @@
+################################################################################
+# Name: build.init
+# Desc: Initial system setup. Assumes base system install
+################################################################################
+
+set -e
+[ "$(whoami)" == "root" ] || { echo "Must be root!"; exit 2; }
+
+################################################################################
+
+dnf -y update
+
+# There are others that I am missing here
+dnf -y install nfs-utils autofs zsh yum-utils
+
+# Remove firewalld
+systemctl stop firewalld
+systemctl disable firewalld
+dnf -y remove firewalld
+
+# Disable SELINUX by default
+echo "SELINUX=disabled" > /etc/sysconfig/selinux
+echo "SELINUXTYPE=targeted" >> /etc/sysconfig/selinux
+
+
+### Docker install
+dnf check-update
+curl -fsSL https://get.docker.com/ | sh
+
+usermod -aG docker jody
+systemctl enable docker
+systemctl start docker
+
+################################################################################
